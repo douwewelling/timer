@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timer</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: #111; color: #f5f5f5;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4vh; user-select: none;
+  }
+  #tijd {
+    font-size: min(28vw, 50vh); font-weight: 600;
+    font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  body.klaar { animation: knipper 1s steps(1) infinite; }
+  @keyframes knipper { 50% { background: #b3261e; } }
+  .rij { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; padding: 0 16px; }
+  button {
+    font: inherit; font-size: 1.2rem; padding: 12px 20px; min-width: 80px;
+    border: 1px solid #444; border-radius: 10px;
+    background: #222; color: #f5f5f5; cursor: pointer;
+  }
+  button:hover { background: #333; }
+  #start { background: #2e7d32; border-color: #2e7d32; min-width: 140px; }
+  #start.loopt { background: #a66b00; border-color: #a66b00; }
+  body.verberg .rij { opacity: 0; transition: opacity .4s; }
+</style>
+</head>
+<body>
+  <div id="tijd">00:00</div>
+
+  <div class="rij">
+    <button data-sec="-60">−1 min</button>
+    <button data-sec="60">+1 min</button>
+    <button data-sec="300">+5 min</button>
+    <button data-sec="600">+10 min</button>
+    <button data-sec="1800">+30 min</button>
+  </div>
+  <div class="rij">
+    <button id="start">Start</button>
+    <button id="reset">Reset</button>
+    <button id="full">Fullscreen</button>
+  </div>
+
+<script>
+  const tijdEl = document.getElementById('tijd');
+  const startEl = document.getElementById('start');
+  let rest = 0;        // resterende ms
+  let eind = null;     // tijdstip waarop hij afloopt (als hij loopt)
+  let piep = null;
+
+  function format(ms) {
+    const s = Math.ceil(ms / 1000);
+    const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+    const mm = String(m).padStart(2, '0'), ss = String(sec).padStart(2, '0');
+    return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  }
+
+  function teken() {
+    const ms = eind ? Math.max(0, eind - Date.now()) : rest;
+    tijdEl.textContent = format(ms);
+    document.title = (eind ? '▶ ' : '') + format(ms);
+    if (eind && ms === 0) afgelopen();
+  }
+
+  function afgelopen() {
+    eind = null; rest = 0;
+    startEl.textContent = 'Start'; startEl.classList.remove('loopt');
+    document.body.classList.add('klaar');
+    piepen();
+  }
+
+  function piepen() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      let n = 0;
+      piep = setInterval(() => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.3, ctx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        o.start(); o.stop(ctx.currentTime + 0.4);
+        if (++n >= 10) stopPiep();
+      }, 600);
+    } catch (e) {}
+  }
+
+  function stopPiep() {
+    clearInterval(piep); piep = null;
+    document.body.classList.remove('klaar');
+  }
+
+  function erbij(sec) {
+    stopPiep();
+    if (eind) eind = Math.max(Date.now(), eind + sec * 1000);
+    else rest = Math.max(0, rest + sec * 1000);
+    teken();
+  }
+
+  function startStop() {
+    stopPiep();
+    if (eind) {
+      rest = Math.max(0, eind - Date.now()); eind = null;
+      startEl.textContent = 'Start'; startEl.classList.remove('loopt');
+    } else if (rest > 0) {
+      eind = Date.now() + rest;
+      startEl.textContent = 'Pauze'; startEl.classList.add('loopt');
+    }
+    teken();
+  }
+
+  function reset() {
+    stopPiep(); eind = null; rest = 0;
+    startEl.textContent = 'Start'; startEl.classList.remove('loopt');
+    teken();
+  }
+
+  function fullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen();
+  }
+
+  document.querySelectorAll('[data-sec]').forEach(b =>
+    b.addEventListener('click', () => erbij(+b.dataset.sec)));
+  startEl.addEventListener('click', startStop);
+  document.getElementById('reset').addEventListener('click', reset);
+  document.getElementById('full').addEventListener('click', fullscreen);
+
+  // Sneltoetsen: spatie = start/pauze, r = reset, f = fullscreen, 1/5/0 = +1/+5/+10 min
+  document.addEventListener('keydown', e => {
+    if (e.key === ' ') { e.preventDefault(); startStop(); }
+    else if (e.key === 'r') reset();
+    else if (e.key === 'f') fullscreen();
+    else if (e.key === '1') erbij(60);
+    else if (e.key === '5') erbij(300);
+    else if (e.key === '0') erbij(600);
+  });
+
+  // Knoppen verbergen in fullscreen als je de muis even niet beweegt
+  let muisTimer;
+  document.addEventListener('mousemove', () => {
+    document.body.classList.remove('verberg');
+    clearTimeout(muisTimer);
+    if (document.fullscreenElement)
+      muisTimer = setTimeout(() => document.body.classList.add('verberg'), 3000);
+  });
+
+  setInterval(teken, 200);
+  teken();
+</script>
+</body>
+</html>
